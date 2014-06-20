@@ -1,0 +1,134 @@
+---
+title: "HumanActivityRecognition"
+author: "Anastasiia"
+output: html_document
+---
+
+<h2> Basic preprocessing </h2>
+
+Download train and test set:
+
+```{r}
+
+download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile="data/trainingset.csv", method="wget")
+
+download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile="data/testingset.csv", method="wget")
+
+```
+
+
+Read data from csv:
+
+```{r}
+trainset <- read.csv("data/trainingset.csv")
+testset <- read.csv("data/testingset.csv")
+
+```
+
+Plot distribition of NA vals in testset by columns:
+
+```{r}
+table(apply(testset, 2, FUN=function(x) sum(is.na(x))))
+```
+
+Get names of columns with complete NA in test set and remove them from test and training sets:
+```{r}
+ind_not_na_columns <- which(apply(testset, 2, FUN=function(x) sum(is.na(x))) == 0)
+trainset <- trainset[ , ind_not_na_columns]
+testset <- testset[ ,ind_not_na_columns]
+# Inspecting colnames
+colnames(trainset)[1:7]
+
+```
+
+Hypothesis: Remove first 7 columns("X","user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window" ), apply PCA as a preprocessing, build prediction using  LDA and GBM. After that, apply GAM for averaging prediction and inspect results.
+
+1. Remove columns from 1 to 7:
+```{r}
+cut_train  <- trainset[ , -c(1:7)]
+
+```
+2. Load library caret and set seed:
+```{r}
+library(caret)
+set.seed(445)
+
+```
+
+3. Split trainings set into train and cross-validation part:
+```{r}
+inTrain = createDataPartition(cut_train$classe, p = 0.8, list = FALSE)
+train = cut_train[ inTrain,]
+cv = cut_train[-inTrain,]
+
+```
+
+4. Train LDA and  GBM   with PCA:
+```{r echo=FALSE}
+model_lda <- train(classe ~., data = train, preProcess="pca", method ="lda")
+model_gbm <- train(classe ~., data = train, preProcess="pca", method = "gbm")
+
+```
+
+
+5. Estimate accuracy on train set and build an ensemble:
+```{r}
+
+lda_train_pred <- predict(model_lda, train[ ,-c(53)])
+gbm_train_pred <- predict(model_gbm, train[ ,-c(53)])
+
+```
+
+```{r}
+confusionMatrix(lda_train_pred, train$classe)
+confusionMatrix(gbm_train_pred, train$classe)
+
+ensemble_train <- data.frame(lda=lda_train_pred, gbm=gbm_train_pred, true_classes=train$classe)
+ensemble_mod <- train(true_classes ~., data=ensemble_train, method = "gam")
+ensemble_pred <- predict(ensemble_mod, ensemble_train)
+
+confusionMatrix(ensemble_pred, train$classe)
+
+
+
+```
+
+
+6. Estimate accuracy on cross-validation:
+```{r}
+
+predict_lda_cv <- predict(model_lda, cv)
+predict_gbm_cv <- predict(model_gbm, cv)
+
+ensemble_cv <- data.frame(lda=predict_lda_cv, gbm=predict_gbm_cv)
+predict_ensemble_cv <- predict(ensemble_mod, ensemble_cv)
+
+confusionMatrix(predict_lda_cv, cv$classe)
+confusionMatrix(predict_gbm_cv, cv$classe)
+confusionMatrix(predict_ensemble_cv, cv$classe)
+
+
+```
+
+The best model is GBM model with accuracy 82% on cv set, so lets'made final prediction on test set:
+7. Made a final prediction:
+```{r}
+final_pred <- predict(model_gbm, testset)
+# write them into files:
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(final_pred)
+
+```
+
+
+
+
+
+
